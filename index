@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Трекер Калорий</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            background: #f4f4f9; 
+            padding: 20px; 
+            max-width: 500px; 
+            margin: 0 auto; 
+        }
+        .card { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 16px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05); 
+            margin-bottom: 20px; 
+        }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        h2, h3 { margin: 0 0 15px 0; color: #333; }
+        .btn { 
+            padding: 12px 15px; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            background: #007bff; 
+            color: white; 
+            font-weight: bold; 
+            font-size: 16px;
+        }
+        .btn-icon { background: #eee; color: #333; padding: 10px; border-radius: 50%; }
+        .hidden { display: none !important; }
+        
+        /* Динамический список пользователей */
+        .user-switch { 
+            display: flex; 
+            gap: 10px; 
+            margin: 15px 0; 
+            flex-wrap: wrap; /* Позволяет кнопкам переноситься на новую строку, если их много */
+        }
+        .user-btn { 
+            flex: 1; 
+            min-width: 80px; /* Минимальная ширина для кнопки */
+            padding: 12px; 
+            border: 2px solid #eee; 
+            border-radius: 12px; 
+            background: white; 
+            cursor: pointer; 
+            transition: 0.2s; 
+            font-size: 16px;
+            text-align: center;
+        }
+        /* Универсальный стиль для выбранного пользователя */
+        .active-user { 
+            background: #e0f2fe; 
+            border-color: #38bdf8; 
+            font-weight: bold; 
+            color: #0369a1; 
+        }
+        
+        .btn-add-user {
+            width: 100%; 
+            background: #e5e7eb; 
+            color: #4b5563; 
+            margin-bottom: 15px;
+            border: 2px dashed #cbd5e1;
+        }
+
+        /* Камера */
+        input[type="file"] { display: none; }
+        .photo-label { 
+            display: block; background: #22c55e; color: white; 
+            text-align: center; padding: 16px; border-radius: 12px; 
+            cursor: pointer; font-weight: bold; font-size: 18px; 
+        }
+        
+        /* Таблица */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { text-align: left; padding: 10px 5px; border-bottom: 1px solid #eee; }
+        th { color: #666; font-size: 14px; }
+        
+        .settings-block { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
+        .settings-input { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="header">
+        <h2>🍽️ Чья тарелка?</h2>
+        <button class="btn btn-icon" onclick="toggleSettings()">⚙️</button>
+    </div>
+    
+    <div id="settingsBlock" class="settings-block hidden">
+        <label>API Ключ Gemini:</label>
+        <input type="password" id="geminiKey" class="settings-input" placeholder="Вставь ключ сюда...">
+        <button class="btn" style="margin-top: 10px; width: 100%;" onclick="saveKey()">Сохранить ключ в браузере</button>
+    </div>
+
+    <div class="user-switch" id="userContainer"></div>
+    
+    <button class="btn btn-add-user" onclick="addNewUser()">+ Добавить пользователя</button>
+
+    <label class="photo-label">
+        📸 Сфоткать блюдо
+        <input type="file" accept="image/*" capture="environment" id="photoInput">
+    </label>
+    
+    <div id="loading" class="hidden" style="text-align: center; color: #666; padding: 10px;">
+        Анализирую фото... ⏳
+    </div>
+
+    <div id="resultBlock" class="hidden settings-block">
+        <h3>Результат:</h3>
+        <p><strong>Блюдо:</strong> <span id="resName">-</span></p>
+        <p><strong>Ккал:</strong> <span id="resKcal">-</span></p>
+        <p><strong>Б/Ж/У:</strong> <span id="resPFC">-</span></p>
+        <button class="btn" style="width: 100%; background: #f97316; margin-top: 15px;" onclick="saveToHistory()">💾 Записать в дневник</button>
+    </div>
+</div>
+
+<div class="card">
+    <h3>📊 Сегодня съели</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Кто</th>
+                <th>Блюдо</th>
+                <th>Ккал</th>
+            </tr>
+        </thead>
+        <tbody id="historyTable">
+            <tr><td colspan="3" style="text-align: center; color: #aaa;">Пока ничего нет</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+    // --- Логика пользователей ---
+    // Загружаем список из памяти браузера. Если там пусто - создаем базовый массив
+    let users = JSON.parse(localStorage.getItem('app_users')) || ['Илья', 'Соня'];
+    // Выбираем первого пользователя по умолчанию
+    let currentUser = users.length > 0 ? users[0] : null;
+
+    // Функция отрисовки кнопок пользователей
+    function renderUsers() {
+        const container = document.getElementById('userContainer');
+        container.innerHTML = ''; // Очищаем контейнер перед перерисовкой
+
+        users.forEach(name => {
+            const btn = document.createElement('button');
+            // Если имя совпадает с текущим, вешаем класс active-user
+            btn.className = name === currentUser ? 'user-btn active-user' : 'user-btn';
+            btn.textContent = name;
+            btn.onclick = () => selectUser(name);
+            container.appendChild(btn);
+        });
+    }
+
+    // Функция выбора пользователя
+    function selectUser(name) {
+        currentUser = name;
+        renderUsers(); // Перерисовываем кнопки, чтобы обновить цвет активной
+    }
+
+    // Функция добавления нового пользователя
+    function addNewUser() {
+        const newName = prompt('Введите имя нового пользователя:');
+        
+        if (newName && newName.trim() !== '') {
+            const formattedName = newName.trim();
+            
+            // Проверяем, нет ли уже такого имени
+            if (!users.includes(formattedName)) {
+                users.push(formattedName);
+                // Сохраняем обновленный список в localStorage
+                localStorage.setItem('app_users', JSON.stringify(users));
+                selectUser(formattedName); // Сразу делаем нового пользователя активным
+            } else {
+                alert('Пользователь с таким именем уже существует!');
+            }
+        }
+    }
+
+    // Первичная отрисовка пользователей при загрузке страницы
+    renderUsers();
+
+
+    // --- Настройки и мок-функции (как в прошлом шаге) ---
+    function toggleSettings() {
+        const block = document.getElementById('settingsBlock');
+        block.classList.toggle('hidden');
+        if(!block.classList.contains('hidden')) {
+            document.getElementById('geminiKey').value = localStorage.getItem('gemini_api_key') || '';
+        }
+    }
+
+    function saveKey() {
+        const key = document.getElementById('geminiKey').value;
+        localStorage.setItem('gemini_api_key', key.trim());
+        alert('Ключ сохранен локально!');
+        toggleSettings();
+    }
+
+    document.getElementById('photoInput').addEventListener('change', function(e) {
+        if(e.target.files.length === 0) return;
+        
+        document.getElementById('loading').classList.remove('hidden');
+        document.getElementById('resultBlock').classList.add('hidden');
+
+        setTimeout(() => {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('resultBlock').classList.remove('hidden');
+            
+            document.getElementById('resName').textContent = 'Пример: Курица с гречкой';
+            document.getElementById('resKcal').textContent = '350';
+            document.getElementById('resPFC').textContent = '40г / 10г / 50г';
+        }, 1500);
+    });
+
+    function saveToHistory() {
+        alert(`Запись сохранена для пользователя: ${currentUser}`);
+    }
+</script>
+
+</body>
+</html>
